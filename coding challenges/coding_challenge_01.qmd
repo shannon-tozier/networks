@@ -1,0 +1,88 @@
+---
+title: "coding_challenge_01"
+format: html
+---
+
+loading packages
+
+```{r}
+library(tidyverse)
+library(igraph)
+library(network)
+library(intergraph)
+```
+
+reading in the data
+
+```{r}
+edge_matrix <- read_csv("data/camp_time1.csv")
+
+edge_matrix <- edge_matrix |> select(!ID)
+colnames(edge_matrix) <- 1:ncol(edge_matrix)
+
+edge_matrix <- as.matrix(edge_matrix)
+```
+
+```{r}
+attributes <- read.csv("data/camp_attributes.csv", stringsAsFactors = T)
+```
+
+practice with igraph
+
+```{r}
+igraph_net <- graph_from_adjacency_matrix(adjmatrix = edge_matrix, 
+                                          mode = "directed")
+```
+
+```{r}
+igraph_net <- set_vertex_attr(graph = igraph_net, 
+                              name = "gender", 
+                              value = attributes$gender)
+
+igraph_net <- set_vertex_attr(graph = igraph_net, 
+                              name = "counselor", 
+                              value = attributes$counselor)
+```
+
+```{r}
+V(igraph_net)$color <- ifelse(attributes$gender == 0, "lightpink", "lightskyblue")
+V(igraph_net)$shape <- ifelse(attributes$counselor == 0, "circle", "square")
+deg <- degree(igraph_net, mode = "in")
+```
+
+```{r}
+plot(igraph_net, vertex.size = deg*5, margin = -0.1, layout = layout_with_graphopt)
+```
+
+practice with network
+
+```{r}
+attributes$ID <- 1:nrow(attributes)
+attribute_list <- do.call(list, attributes)
+```
+
+```{r}
+network_net <- network(edge_matrix,
+                       directed = T,
+                       vertex.attr = attribute_list)
+```
+
+moving around between them
+
+```{r}
+net_from_i <- asNetwork(igraph_net)
+i_from_net <- asIgraph(network_net)
+```
+
+network measures
+
+```{r}
+edge_density(igraph_net)
+degree(igraph_net, mode = "in")
+degree(igraph_net, mode = "out")
+betweenness(igraph_net)
+closeness(igraph_net)
+eigen_centrality(igraph_net)
+```
+
+There seems to be a pretty strong gender homophily, as is common with kids. The network structure is very much a product of the fact that each camper could only name 3 (and had to name 3) friends/connections, and would likely be very different with no numeric constraint. With this constraint, however, there is not a relatively large disparity between the most and least "popular", especially considering that the more popular nodes, like 4, may have trauly reciprocated more ties than they were allowed.
