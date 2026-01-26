@@ -1,0 +1,143 @@
+---
+title: "coding_challenge_02"
+format: html
+---
+
+loading packages
+
+```{r}
+library(tidyverse)
+library(igraph)
+library(network)
+library(intergraph)
+library(ggplot2)
+library(GGally)
+```
+
+reading in the data
+
+```{r}
+course_edges <- read_csv("data/mill_edges_c.csv")
+course_edges <- course_edges |> select(!...1)
+course_edges <- as.data.frame(course_edges)
+
+personal_edges <- read_csv("data/mill_edges_p.csv")
+personal_edges <- personal_edges |> select(!...1)
+personal_edges <- as.data.frame(personal_edges)
+
+reform_edges <- read_csv("data/mill_edges_r.csv")
+reform_edges <- reform_edges |> select(!...1)
+reform_edges <- as.data.frame(reform_edges)
+
+all_edges <- rbind(course_edges, personal_edges, reform_edges)
+all_edges <- as.data.frame(all_edges)
+```
+
+```{r}
+attributes <- read.csv("data/attributes-1.csv", stringsAsFactors = T)
+attributes <- attributes |> mutate(across(everything(), as.character))
+attributes <- attributes %>% rename(ego = id)
+```
+
+creating networks
+
+```{r}
+course_net <- graph_from_data_frame(d = course_edges, directed = T, 
+                                   vertices = attributes)
+
+personal_net <- graph_from_data_frame(d = personal_edges, directed = T, 
+                                   vertices = attributes)
+
+reform_net <- graph_from_data_frame(d = reform_edges, directed = T, 
+                                   vertices = attributes)
+
+full_net <- graph_from_data_frame(d = all_edges, directed = T, 
+                                   vertices = attributes)
+```
+
+```{r}
+colors <- c("1" = "lightpink", "2" = "lightblue", "3" = "lightgreen", "4" = "yellow")
+
+V(course_net)$color <- colors[V(course_net)$school]
+c_deg <- degree(course_net, mode = "in")
+
+V(personal_net)$color <- colors[V(personal_net)$school]
+p_deg <- degree(personal_net, mode = "in")
+
+V(reform_net)$color <- colors[V(reform_net)$school]
+r_deg <- degree(reform_net, mode = "in")
+
+colors2 <- c("Course" = "red", "Personal" = "blue", "Reform" = "black")
+
+V(full_net)$color <- colors[V(full_net)$school]
+f_deg <- degree(full_net, mode = "in")
+E(full_net)$color <- colors2[E(full_net)$relation]
+```
+
+plotting
+
+```{r}
+plot(course_net, 
+     vertex.size = (c_deg*3+2), 
+     vertex.label = NA, 
+     edge.arrow.size = .5, 
+     edge.arrow.width = 0.5, 
+     edge.width = E(course_net)$weight,
+     layout = layout_with_fr)
+
+plot(personal_net, 
+     vertex.size = (p_deg*3+2), 
+     vertex.label = NA, 
+     edge.arrow.size = .5, 
+     edge.arrow.width = 0.5, 
+     edge.width = E(personal_net)$weight,
+     layout = layout_with_fr,
+     margin = -0.1)
+
+plot(reform_net, 
+     vertex.size = (r_deg*3+2), 
+     vertex.label = NA, 
+     edge.arrow.size = .5, 
+     edge.arrow.width = 0.5, 
+     edge.width = E(reform_net)$weight,
+     layout = layout_with_fr,
+     margin = -0.1)
+
+plot(full_net, 
+     vertex.size = (f_deg+2), 
+     vertex.label = NA, 
+     edge.arrow.size = .5, 
+     edge.arrow.width = 0.5, 
+     edge.width = E(full_net)$weight/2,
+     layout = layout_with_fr,
+     margin = -0.1)
+```
+
+while it seems that most ties exist within the schools (which one would expect), there seems to be enough inter-school communication that I would worry about detrimental effects of splitting up the schools.
+
+
+using ggnet2
+
+```{r}
+full_net2 <- asNetwork(full_net)
+```
+
+```{r}
+ggnet2(full_net2)
+```
+... ggnet2 cannot plot multiplex graphs :(
+
+```{r}
+course_net2 <- asNetwork(course_edges, directed = TRUE)
+```
+
+```{r}
+ggnet2(course_net2, 
+       node.size = c_deg,
+       edge.size = .5, 
+       arrow.size = 3, 
+       arrow.gap = 0.02, 
+       edge.color = "grey80") + 
+  guides(size = "none")
+```
+ it is not transferring the ties as directed for some reason. it is also breaking when I try to use my colors. I think I will stick with the igraph plots. :) 
