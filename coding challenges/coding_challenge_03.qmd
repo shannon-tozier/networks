@@ -1,0 +1,293 @@
+---
+title: "coding_challenge_03"
+format: html
+---
+
+```{r}
+library(tidyverse)
+library(egor)
+library(igraph)
+library(MASS)
+```
+
+Loading data
+
+```{r}
+url1 <- "https://github.com/JeffreyAlanSmith/Integrated_Network_Science/raw/master/data/gss1985_ego_dat.csv"
+
+ego_dat <- read.csv(file = url1, stringsAsFactors = F) 
+
+ego_dat <- ego_dat[!is.na(ego_dat$NUMGIVEN), ]
+```
+
+```{r}
+url2 <- "https://github.com/JeffreyAlanSmith/Integrated_Network_Science/raw/master/data/gss1985_alter_dat.csv"
+
+alter_dat <- read.csv(file = url2, stringsAsFactors = F)
+```
+
+```{r}
+url3 <- "https://github.com/JeffreyAlanSmith/Integrated_Network_Science/raw/master/data/gss1985_alteralter_dat.csv"
+
+alteralter_dat <- read.csv(file = url3)
+```
+
+building the networks
+
+```{r}
+egonetlist <-  egor(alters = alter_dat, egos = ego_dat, 
+                    aaties = alteralter_dat, alter_design = list(max = 5), 
+                    ID.vars = list(ego = "CASEID", alter ="ALTERID", 
+                                   source = "ALTER1", target = "ALTER2")) 
+```
+
+preliminary exploration
+
+```{r}
+dens <- ego_density(egonetlist)
+```
+
+plotting
+
+```{r}
+igraph_nets <- as_igraph(egonetlist)
+```
+
+```{r}
+par(mfrow = c(1, 3))
+purrr::walk(igraph_nets[1:3], plot)
+```
+
+```{r}
+plotfunc_colorgender <- function(nets){ 
+  
+  cols <- vertex_attr(nets, "SEX") 
+
+  cols <- ifelse(cols == "female", "lightskyblue", "blue")
+
+  plot(nets, vertex.color = cols) 
+}
+```
+
+```{r}
+par(mfrow = c(1, 3))
+purrr::walk(igraph_nets[1:3], plotfunc_colorgender)
+```
+
+ego-alter homophily
+
+```{r}
+prop_same_function <- function(alt.attr, ego.attr){
+
+  same <- sum(ego.attr == alt.attr, na.rm = T) 
+
+  prop_same <- same / sum(!is.na(alt.attr))
+  
+  prop_same[is.na(ego.attr)] <- NA
+  
+  return(prop_same) 
+} 
+```
+
+homophily by gender
+
+```{r}
+pmatch_sex <- comp_ply(egonetlist, 
+                       alt.attr = "SEX", 
+                       .f = prop_same_function, 
+                       ego.attr = "SEX") 
+```
+
+```{r}
+egonetlist_kin <- subset(egonetlist, egonetlist[["alter"]]$KIN == 1, 
+                         unit = "alter") 
+
+pmatch_sex_kin <- comp_ply(egonetlist_kin, 
+                           alt.attr = "SEX", 
+                           .f = prop_same_function, 
+                           ego.attr = "SEX") 
+```
+
+```{r}
+egonetlist_nonkin <- subset(egonetlist, egonetlist[["alter"]]$KIN == 0,
+                            unit = "alter") 
+
+pmatch_sex_nonkin <- comp_ply(egonetlist_nonkin, 
+                              alt.attr = "SEX", 
+                              .f = prop_same_function, 
+                              ego.attr = "SEX")
+```
+
+```{r}
+sexdat <- data.frame(pmatch_sex$result, 
+                     pmatch_sex_kin$result, 
+                     pmatch_sex_nonkin$result)
+```
+
+homophily by race
+
+```{r}
+pmatch_race <- comp_ply(egonetlist, 
+                        alt.attr = "RACE", 
+                        .f = prop_same_function, 
+                        ego.attr = "RACE")
+
+pmatch_race_kin <- comp_ply(egonetlist_kin, 
+                            alt.attr = "RACE", 
+                            .f = prop_same_function, 
+                            ego.attr = "RACE")
+
+pmatch_race_nonkin <- comp_ply(egonetlist_nonkin, 
+                               alt.attr = "RACE", 
+                               .f = prop_same_function, 
+                               ego.attr = "RACE")
+
+racedat <- data.frame(pmatch_race$result, 
+                      pmatch_race_kin$result, 
+                      pmatch_race_nonkin$result)
+```
+
+exploring
+
+```{r}
+apply(sexdat, MARGIN = 2, FUN = summary)
+
+apply(racedat, MARGIN = 2, FUN = summary)
+```
+
+dyadic homogeneity
+
+```{r}
+ego_alter_dat <- data.frame(as_alters_df(egonetlist, include.ego.vars = TRUE))
+```
+
+```{r}
+cnames <- colnames(ego_alter_dat)
+
+which_age_column <- which(colnames(ego_alter_dat) == "AGE")
+which_educ_cat_column <- which(colnames(ego_alter_dat) == "EDUC_CATEGORICAL")
+
+alter_columns <- which_age_column:which_educ_cat_column
+
+cnames[alter_columns] <- paste(cnames[alter_columns], "_alter", sep = "") 
+
+colnames(ego_alter_dat) <- cnames 
+```
+
+gender & race
+
+```{r}
+sextab <- table(ego_alter_dat[, "SEX_ego"], 
+                ego_alter_dat[, "SEX_alter"])
+
+racetab <- table(ego_alter_dat[, "RACE_ego"], 
+                 ego_alter_dat[, "RACE_alter"])
+```
+
+```{r}
+oddsratio_function <-  function(egoalter_tab, attribute) {
+  
+  match <- sum(diag(egoalter_tab)) 
+
+  notmatch <- sum(egoalter_tab) - match
+  
+  freq <- table(attribute) 
+  
+  total_dyads <- sum(freq) * (sum(freq) - 1)
+  
+  match_chance <- sum(freq * (freq - 1))
+
+  notmatch_chance <-  total_dyads - match_chance 
+
+  or <- (match * notmatch_chance) / (notmatch * match_chance) 
+
+  return(or)
+} 
+```
+
+```{r}
+oddsratio_function(egoalter_tab = sextab, 
+                   attribute = ego_dat[, "SEX"])
+
+oddsratio_function(egoalter_tab = racetab, 
+                   attribute = ego_dat[, "SEX"])
+```
+
+Alter Homophily
+
+```{r}
+sex_diversity <- alts_diversity_entropy(egonetlist, 
+                                        alt.attr = "SEX", 
+                                        base = exp(1))
+
+race_diversity <- alts_diversity_entropy(egonetlist, 
+                                         alt.attr = "RACE", 
+                                         base = exp(1))
+```
+
+```{r}
+sex_diversity[ego_dat$NUMGIVEN <= 1, "entropy"] <-  NA
+race_diversity[ego_dat$NUMGIVEN <= 1, "entropy"] <-  NA
+```
+
+continuous variable (education)
+
+```{r}
+mean_altereduc <- comp_ply(egonetlist, 
+                           alt.attr = "EDUC", 
+                           .f = mean, 
+                           na.rm = TRUE) 
+```
+
+EgoNets as Predictors
+
+```{r}
+ego_dat$HAPPY_FACTOR <- factor(ego_dat$HAPPY, 
+                               levels = c(3, 2, 1), 
+                               labels = c("not too happy", 
+                                          "pretty happy", 
+                                          "very happy"))
+```
+
+```{r}
+ego_dat$RACE_FACTOR <- factor(ego_dat$RACE, 
+                              levels = c("white", 
+                                         "asian", 
+                                         "black", 
+                                         "hispanic", 
+                                         "other")) 
+ego_dat$SEX_FACTOR <- factor(ego_dat$SEX)
+```
+
+```{r}
+ego_dat$DENSITY <- dens[["density"]]
+ego_dat$RACE_DIVERSITY <- race_diversity[["entropy"]] 
+ego_dat$MEAN_ALTEREDUC <- mean_altereduc[["result"]] 
+```
+
+```{r}
+ego_dat_nomiss <- na.omit(ego_dat[, c("HAPPY_FACTOR", 
+                                      "NUMGIVEN", 
+                                      "DENSITY", 
+                                      "MEAN_ALTEREDUC", 
+                                      "RACE_DIVERSITY", 
+                                      "EDUC", 
+                                      "AGE", 
+                                      "RACE_FACTOR", 
+                                      "SEX_FACTOR")])
+```
+
+```{r}
+happy_mod1 <- polr(HAPPY_FACTOR ~ NUMGIVEN + DENSITY, data = ego_dat_nomiss)
+summary(happy_mod1)
+
+happy_mod2 <- polr(HAPPY_FACTOR ~ NUMGIVEN + DENSITY + EDUC + AGE + RACE_FACTOR + SEX_FACTOR, 
+                   data = ego_dat_nomiss)
+summary(happy_mod2)
+
+happy_mod3 <- polr(HAPPY_FACTOR ~ NUMGIVEN + DENSITY + EDUC + AGE + 
+                     RACE_FACTOR + SEX_FACTOR + MEAN_ALTEREDUC + RACE_DIVERSITY, 
+                   data = ego_dat_nomiss)
+summary(happy_mod3)
+```
+
