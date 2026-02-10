@@ -1,0 +1,117 @@
+---
+title: "coding_challenge_04"
+format: html
+---
+
+```{r}
+library(tidyverse)
+library(igraph)
+library(sna)
+library(intergraph)
+```
+
+reading in the data
+
+```{r}
+edges <- read_csv("data/neo_edges_a.csv")
+edges <- edges |> select(!...1)
+edges <- as.data.frame(edges)
+
+attributes <- read_csv("data/neo_nodes.csv")
+attributes <- attributes |> select(!...1)
+attributes <- as.data.frame(attributes)
+```
+
+creating network
+
+```{r}
+net <- graph_from_data_frame(d = edges,
+                             directed = T,
+                             vertices = attributes)
+```
+
+visualizing
+
+```{r}
+plot(net,
+     vertex.size = 10)
+```
+
+```{r}
+V(net)$color <- ifelse(attributes$Supervisor == 0, "lightgreen", "lightskyblue")
+deg <- degree(net, mode = "in")
+```
+
+```{r}
+plot(net,
+     vertex.size = (deg + 1),
+     edge.arrow.size = 0.5,
+     edge.arrow.width = 0.5,
+     layout = layout_with_fr)
+```
+
+dyad census and reciprocity
+
+```{r}
+dyad_census(net)
+
+netx <- asNetwork(net)
+grecip(dat = netx, measure = "dyadic.nonnull")
+```
+
+```{r}
+cug_recip <- cug.test(dat = netx,
+                      FUN = grecip,
+                      mode = c("digraph"), 
+                      cmode = c("edges"),
+                      reps = 1000,
+                      FUN.args = list(measure = "dyadic.nonnull"))
+
+cug_recip$obs.stat
+
+summary(cug_recip$rep.stat) #observed reciprocity is higher than expected by random chance
+```
+
+triad census
+
+```{r}
+triad.census(netx)
+```
+
+```{r}
+count_triads_function <- function(dat, triad_names){
+  # Arguments:
+  # dat: the network object
+  # triad_names: the name of the triad type
+  
+  triads <- triad.census(dat) # calculating the triad census
+  triads[1, triad_names] # grabbing counts of triad of interest
+}
+```
+
+```{r}
+cug_triads <- cug.test(netx, 
+                       FUN = count_triads_function, 
+                       mode = c("digraph"), 
+                       cmode = c("dyad.census"), 
+                       reps = 1000, 
+                       FUN.args = list(triad_names = c("030T"))) 
+```
+
+```{r}
+source("https://github.com/JeffreyAlanSmith/Integrated_Network_Science/raw/master/R/CUGtest_alltriads.R")
+```
+
+```{r}
+CUG_test_table <- CUGtest_alltriads(dat = netx, 
+                                    mode = "digraph", 
+                                    cmode = "dyad.census", 
+                                    reps = 1000)
+```
+
+transitivity
+
+```{r}
+gtrans(dat = netx, measure = "weak") 
+```
+
