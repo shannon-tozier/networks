@@ -1,0 +1,236 @@
+---
+title: "coding_challenge_05"
+format: html
+---
+
+```{r}
+library(tidyverse)
+library(igraph)
+library(ggplot2)
+```
+
+bringing in data
+
+```{r}
+edges <- read_table("data/Contact-diaries-network_data_2013.csv")
+
+attributes <- read_tsv("data/HighSchool2013_metadata.txt")
+```
+
+make the network
+
+```{r}
+net <- graph_from_data_frame(d = edges,
+                             directed = F,
+                             vertices = attributes)
+```
+
+initial exploration
+
+there are a bunch of isolates (over 200) because not everyone filled out the diary so I will take them out for now
+
+```{r}
+isolated <- which(degree(net) == 0)
+nett <- delete_vertices(net, isolated)
+
+plot(nett,
+     vertex.label = NA,
+     vertex.size = 5,
+     edge.arrow.size = 0.25,
+     vertex.frame.color = NA)
+```
+
+```{r}
+edge_density(nett)
+
+# not very dense!!
+```
+
+there is only 1 component because I removed the isolates (i will figure out how to do that with more precision)
+
+```{r}
+biconnected_components(nett)
+
+# 7 bicomponents, most with only 2 or 3 nodes
+```
+
+```{r}
+vertex_connectivity(nett)
+
+# only 1 because of that major bridge
+```
+
+community detection
+
+walktrap
+
+```{r}
+nett_wt4 <- cluster_walktrap(graph = nett, 
+                             steps = 4, 
+                             membership = T)
+mem_wt4 <- membership(nett_wt4)
+modularity(nett_wt4)
+
+nett_wt3 <- cluster_walktrap(graph = nett, 
+                             steps = 3, 
+                             membership = T)
+mem_wt3 <- membership(nett_wt3)
+modularity(nett_wt3)
+```
+
+```{r}
+layout <- layout_with_fr(nett)
+
+plot(nett, 
+     layout = layout,
+     vertex.color = mem_wt4, 
+     edge.color = "light gray", 
+     vertex.size = 5, 
+     main = "Walktrap: 4 Steps",
+     vertex.label = NA)
+
+plot(nett, 
+     layout = layout,
+     vertex.color = mem_wt3, 
+     edge.color = "light gray", 
+     vertex.size = 5, 
+     main = "Walktrap: 3 Steps",
+     vertex.label = NA)
+
+# these have some weird disjointed groups
+```
+
+edge betweeness
+
+```{r}
+nett_eb <- cluster_edge_betweenness(nett)
+mem_eb <- membership(nett_eb)
+```
+
+```{r}
+plot(as.dendrogram(nett_eb))
+# help i'm scared
+
+plot(nett, 
+     layout = layout,
+     vertex.color = mem_eb, 
+     edge.color = "light gray", 
+     vertex.size = 5, 
+     main = "Edge Betweeness",
+     vertex.label = NA)
+# less questionable groups than WT
+```
+
+Scree Plots
+
+scary function
+```{r}
+extract_modularity_data <- function(communities, graph){
+
+  # Arguments:
+  # communities: igraph communities object
+  # graph: igraph object
+  
+  mems_list <- list() # list where membership information will be saved
+  num_communities <- NA # vector where number of communities will be saved
+  modularities <- NA # avector to store modularity scores
+
+  # Extracting levels of aggregation, or steps,
+  # in the hierarchical merge data.
+  num_merges <- 0:nrow(communities$merges)
+
+  # Note that we start from 0 as the first level
+  # corresponds to all nodes in their own community,
+  # and that does not have a row in the  merge data frame.
+
+  # Looping through each level of aggregation
+  for (x in 1:length(num_merges)){
+    # We first extract the membership 
+    # information at the given merge level using a 
+    # cut_at function. The inputs are the community
+    # object and the merge step of interest. 
+  
+    mems_list[[x]] <- cut_at(communities, steps = num_merges[x])
+    
+    # Now we calculate the number of communities associated
+    # with the given clustering solution: 
+    num_communities[x] <- length(unique(mems_list[[x]]))
+    
+    # Let's also calculate the modularity score, just to make sure
+    # we get the right value for that set of community memberships:
+    modularities[x] <- modularity(graph, mems_list[[x]])
+    }
+
+  # We will now put together our extracted 
+  # information in a data frame. 
+  
+  plot_data <- data.frame(modularity = modularities, 
+                          num_communities = num_communities)
+
+  # Let's reorder to go from low number of communities to high:
+  mems_list <- mems_list[order(plot_data$num_communities)]
+  plot_data <- plot_data[order(plot_data$num_communities), ] 
+  rownames(plot_data) <- 1:nrow(plot_data)
+
+  # outputting results in a list:
+  return(list(summary_data = plot_data, 
+       membership_list = mems_list))
+}
+```
+
+using the scary function
+
+```{r}
+modularity_data <- extract_modularity_data(communities = nett_eb, 
+                                           graph = nett)
+
+summary_data <- modularity_data[[1]]
+```
+
+```{r}
+ggplot(summary_data, aes(num_communities, modularity)) +
+  geom_bar(stat = "identity", fill = "grey") + 
+  geom_line(color = "black", linetype = "solid") + 
+  geom_point(shape = 19, size = 1, color = "black") +
+  labs(title = "Modularity by Number of Communities",
+       x = "Number of Communities", y = "Modularity")
+```
+
+Multi-level Clustering
+
+```{r}
+set.seed(100)
+comm_multi <- cluster_louvain(graph = nett, 
+                                     resolution = 1)
+
+comm_multi$memberships 
+```
+
+```{r}
+mems_mult_level1 <- comm_multi$memberships[1, ]
+mems_mult_level2 <- comm_multi$memberships[2, ]
+table(mems_mult_level1, mems_mult_level2) 
+```
+
+```{r}
+plot(nett, 
+     layout = layout,
+     vertex.color = mems_mult_level1, 
+     edge.color = "light gray", 
+     vertex.size = 5, 
+     main = "Level 1 Community Membership",
+     vertex.label = NA)
+
+plot(nett, 
+     layout = layout,
+     vertex.color = mems_mult_level2, 
+     edge.color = "light gray", 
+     vertex.size = 5, 
+     main = "Level 2 Community Membership",
+     vertex.label = NA)
+```
+
+Cohesive Blocking
+
+i fear my network is too complex so it yells at me when i try this
+
