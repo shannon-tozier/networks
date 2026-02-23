@@ -85,4 +85,4 @@ closeness(igraph_net)
 eigen_centrality(igraph_net)
 ```
 
-There seems to be a pretty strong gender homophily, as is common with kids. The network structure is very much a product of the fact that each camper could only name 3 (and had to name 3) friends/connections, and would likely be very different with no numeric constraint. With this constraint, however, there is not a relatively large disparity between the most and least "popular", especially considering that the more popular nodes, like 4, may have trauly reciprocated more ties than they were allowed.
+There seems to be a pretty strong gender homophily, as is common with kids. The network structure is very much a product of the fact that each camper could only name 3 (and had to name 3) friends/connections, and would likely be very different with no numeric constraint. With this constraint, however, there is not a relatively large disparity between the most and least "popular", especially considering that the more popular nodes, like 4, may have truly reciprocated more ties than they were allowed.
