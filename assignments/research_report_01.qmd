@@ -28,6 +28,10 @@ filtered_edges <- filter(all_edges, i %in% sub_edges$i | j %in% sub_edges$i)
 edges <- filtered_edges |> 
   distinct(i, j, .keep_all = T) |> 
   relocate(t, .after = Cj)
+
+edges2 <- all_edges |> 
+  distinct(i, j, .keep_all = T) |> 
+  relocate(t, .after = Cj)
   
 ```
 
@@ -36,23 +40,26 @@ net <- graph_from_data_frame(d = edges,
                              directed = F,
                              vertices = attributes)
 
-isolated <- which(degree(net) == 0)
-net <- delete_vertices(net, isolated)
+net2 <- graph_from_data_frame(d = edges2,
+                             directed = F,
+                             vertices = attributes)
 
-attributes <- filter(attributes, i %in% filtered_edges$i | i %in% filtered_edges$j)
+isolated <- which(degree(net2) == 0)
+net2 <- delete_vertices(net2, isolated)
+
+attributes <- filter(attributes, i %in% edges2$i | i %in% edges2$j)
 ```
 
 This is the high school interaction data I am using for my second year paper. Specifically, the network I am analyzing here is of the monitored face-to-face interactions. However, because the project is largely focused on comparing the physical interaction data to the diary-log data, I have filtered down the network to only show the nodes who provided the diary data and the individuals they reference in their diary-log. In this network, a tie is registered if the individuals were in face-to-face proximity for at least 20 seconds. The data logged every interaction as a distinct tie, so I also narrowed down the data to show a maximum of one tie per dyad (I am working on turning the quantity of interactions into a tie weight). As most, but not all (86%) of the students in the school wore the physical sensors, and only 120 (approx. 1/3) provided diary logs, this network is not a perfectly accurate representation of the social space, but it does accurately represent the social space of the individuals of interest for this project.
 
 ```{r}
-cols <- ifelse(attributes$Gi == "F", "lightpink", "lightblue") 
-V(net)$color <- cols 
+V(net2)$color <- ifelse(attributes$Gi == "F", "lightpink", "lightblue")
 
-V(net)$shape <- ifelse(attributes$i %in% sub_edges$i, "square", "circle")
+V(net2)$shape <- ifelse(attributes$i %in% sub_edges$i, "square", "circle")
 
-deg <- degree(net, mode = "all")
+deg <- degree(net2, mode = "all")
 
-layout <- layout_with_fr(net)
+layout <- layout_with_fr(net2)
 
 par(mar = c(0, 0, 0, 0) + 0.1) 
 ```
@@ -62,20 +69,20 @@ par(mar = c(0, 0, 0, 0) + 0.1)
 #| fig-height: 8
 #| fig-width: 8
 
-plot(net,
+plot(net2,
      vertex.label = NA,
      vertex.size = sqrt(deg),
      layout = layout)
 ```
 
 ```{r}
-edge_density(net)
+edge_density(net2)
 
-transitivity(net, type = "global")
+transitivity(net2, type = "global")
 
-mixingm(net, "Gi")
+mixingm(net2, "Gi")
 
-mixingm(net, V(net)$shape)
+mixingm(net2, V(net2)$shape)
 ```
 
 The network is visualized with nodes sized proportional to their degree centrality, colored based on gender (pink = female, blue = male), and shaped based on if they provided diary-log data (square = yes, circle = no).
