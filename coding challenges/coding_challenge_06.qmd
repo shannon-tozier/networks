@@ -1,0 +1,366 @@
+---
+title: "coding_challenge_06"
+format: html
+---
+
+```{r}
+library(tidyverse)
+library(igraph)
+```
+
+reading in the data
+
+```{r}
+edges <- read_csv("data/daly_edges.csv")
+edges_col <- edges |> 
+  select(!...1) |> 
+  filter(relation == "Collaboration") |> 
+  filter(time == 1)
+edges_col <- as.data.frame(edges_col)
+
+attributes <- read_csv("data/daly_nodes.csv")
+attributes <- attributes |> 
+  filter(...1 < 44) |> 
+  select(!...1)
+attributes <- as.data.frame(attributes)
+```
+
+creating network
+
+```{r}
+net1 <- graph_from_data_frame(d = edges_col,
+                             directed = T,
+                             vertices = attributes)
+```
+
+cohesion/communities
+
+cohesion
+
+```{r}
+plot(net1, vertex.label = NA, vertex.size = 10,
+     edge.arrow.size = .25, edge.arrow.width = 1, 
+     edge.color = "light gray", vertex.frame.color = NA)
+```
+
+```{r}
+edge_density(net1)
+```
+
+```{r}
+components_collaboration <- components(graph = net1, mode = "weak")
+
+components_collaboration # one main component with 4 isolates
+```
+
+```{r}
+bicomponents_collaboration <- biconnected_components(graph = net1)
+
+bicomponents_collaboration$components # some non-cohesion here as it is splitting into more (odd) groups
+```
+
+communities
+
+walktrap
+
+```{r}
+collab_wt4 <- cluster_walktrap(graph = net1, steps = 4, 
+                                    membership = T)
+
+collab_wt4
+```
+
+```{r}
+mems_wt_4step <- membership(collab_wt4)
+
+mems_wt_4step
+
+
+mod_wt_4step <- modularity(collab_wt4)
+
+mod_wt_4step
+```
+
+```{r}
+collab_wt3 <- cluster_walktrap(graph = net1, steps = 3, 
+                                    membership = T)
+
+collab_wt3
+```
+
+```{r}
+mems_wt_3step <- membership(collab_wt3)
+
+mems_wt_3step
+
+
+mod_wt_3step <- modularity(collab_wt3)
+
+mod_wt_3step 
+
+# slightly higher modularity and 1 more group
+```
+
+```{r}
+table(mems_wt_4step, mems_wt_3step)
+```
+
+```{r}
+layout <- layout_with_fr(net1)
+
+plot(net1, layout = layout,
+     vertex.color = mems_wt_4step, edge.color = "light gray", 
+     vertex.size = 20, main = "Walktrap: 4 Steps")
+
+plot(net1, layout = layout,
+     vertex.color = mems_wt_3step, edge.color = "light gray", 
+     vertex.size = 20, main = "Walktrap: 3 Steps")
+
+# basically just pulled 39 and 43 into their own group off of the orange
+```
+
+edge betweenness
+
+```{r}
+collab_eb <- cluster_edge_betweenness(graph = net1)
+
+collab_eb # this made 13 groups (more than either wt)
+
+mems_eb <- membership(collab_eb)
+```
+
+```{r}
+table(mems_wt_3step, mems_eb) 
+```
+
+```{r}
+plot(as.dendrogram(collab_eb))
+
+plot(net1, layout = layout,
+     vertex.color = mems_eb, edge.color = "light gray", 
+     vertex.size = 20, main = "edge betwenness")
+
+# these groups are pretty different from the wt groups
+```
+
+scree plots
+
+```{r}
+extract_modularity_data <- function(communities, graph){
+
+  # Arguments:
+  # communities: igraph communities object
+  # graph: igraph object
+  
+  mems_list <- list() # list where membership information will be saved
+  num_communities <- NA # vector where number of communities will be saved
+  modularities <- NA # avector to store modularity scores
+
+  # Extracting levels of aggregation, or steps,
+  # in the hierarchical merge data.
+  num_merges <- 0:nrow(communities$merges)
+
+  # Note that we start from 0 as the first level
+  # corresponds to all nodes in their own community,
+  # and that does not have a row in the  merge data frame.
+
+  # Looping through each level of aggregation
+  for (x in 1:length(num_merges)){
+    # We first extract the membership 
+    # information at the given merge level using a 
+    # cut_at function. The inputs are the community
+    # object and the merge step of interest. 
+  
+    mems_list[[x]] <- cut_at(communities, steps = num_merges[x])
+    
+    # Now we calculate the number of communities associated
+    # with the given clustering solution: 
+    num_communities[x] <- length(unique(mems_list[[x]]))
+    
+    # Let's also calculate the modularity score, just to make sure
+    # we get the right value for that set of community memberships:
+    modularities[x] <- modularity(graph, mems_list[[x]])
+    }
+
+  # We will now put together our extracted 
+  # information in a data frame. 
+  
+  plot_data <- data.frame(modularity = modularities, 
+                          num_communities = num_communities)
+
+  # Let's reorder to go from low number of communities to high:
+  mems_list <- mems_list[order(plot_data$num_communities)]
+  plot_data <- plot_data[order(plot_data$num_communities), ] 
+  rownames(plot_data) <- 1:nrow(plot_data)
+
+  # outputting results in a list:
+  return(list(summary_data = plot_data, 
+       membership_list = mems_list))
+}
+```
+
+```{r}
+modularity_data <- extract_modularity_data(communities = collab_eb, 
+                                           graph = net1)
+
+summary_data <- modularity_data[[1]]
+
+summary_data
+```
+
+```{r}
+ggplot(summary_data, aes(num_communities, modularity)) +
+  geom_bar(stat = "identity", fill = "grey") + 
+  geom_line(color = "black", linetype = "solid") + 
+  geom_point(shape = 19, size = 1, color = "black") +
+  labs(title = "Modularity by Number of Communities",
+       x = "Number of Communities", y = "Modularity")
+
+# best seems to be 13/14 groups, as suggested by the eb alg from before
+```
+
+centrality/hierarchy
+
+```{r}
+edges_recog <- edges |> 
+  select(!...1) |> 
+  filter(relation == "Recognition") |> 
+  filter(time == 1)
+edges_recog <- as.data.frame(edges_col)
+
+net2 <- graph_from_data_frame(d = edges_recog,
+                             directed = T,
+                             vertices = attributes)
+```
+
+```{r}
+plot(net2, vertex.label = NA, vertex.size = 10,
+     edge.arrow.size = .25, edge.arrow.width = 1, 
+     edge.color = "light gray", vertex.frame.color = NA)
+```
+
+centrality
+
+```{r}
+indegree_recog <- degree(graph = net2, mode = "in") # number they give recog to
+outdegree_recog <- degree(graph = net2, mode = "out") # they get recog from
+```
+
+```{r}
+outcloseness_recog <- closeness(graph = net2, mode = "out",
+                                 normalized = T)
+incloseness_recog <- closeness(graph = net2, mode = "in", 
+                                normalized = T)
+```
+
+```{r}
+dist_mat_recog <- distances(graph = net2, mode = "out") 
+diag(dist_mat_recog) <- NA #ignoring the diagonal
+dist_mat_recog_inverted <- 1 / dist_mat_recog #inverting distance matrix
+```
+
+```{r}
+outcloseness_recog2 <- apply(dist_mat_recog_inverted, MARGIN = 1, 
+                              FUN = mean, na.rm = T) 
+
+incloseness_recog2 <- apply(dist_mat_recog_inverted, MARGIN = 2, 
+                             FUN = mean, na.rm = T) 
+```
+
+```{r}
+betweenness_recog <- betweenness(graph = net2, normalized = F) 
+```
+
+```{r}
+net2_undirected <- as_undirected(net2, mode = "collapse") 
+
+ev_obj_recog <- eigen_centrality(net2_undirected)
+eigen_recog <- ev_obj_recog$vector
+```
+
+```{r}
+ids <- V(net2)$name
+
+central_recog <- data.frame(ids = ids, net = "recognition", 
+                             indegree = indegree_recog, 
+                             outdegree = outdegree_recog, 
+                             incloseness2 = incloseness_recog2, 
+                             outcloseness2 = outcloseness_recog2,
+                             between = betweenness_recog, 
+                             eigen = eigen_recog)
+
+head(central_recog)
+```
+
+```{r}
+apply(central_recog[, -c(1, 2)], MARGIN = 2, FUN = order, decreasing = T)
+```
+
+```{r}
+library(reshape)
+
+vars_to_stack <-c("ids", "indegree", "incloseness2", "between", "eigen")
+
+recog_long <- melt(central_recog[, vars_to_stack], id.vars = "ids")  
+```
+
+```{r}
+library(ggplot2)
+
+ggplot(recog_long, aes(x = factor(ids, levels = 1:length(ids)), y = value)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~ variable, scales = "free_y", ncol = 2) +
+  xlab("Ids") + ylab("Centrality") +
+ theme(axis.text = element_text(size = 6.5))
+```
+
+```{r}
+plot(net2, vertex.size = central_recog$between / 5,
+     vertex.label = V(net2)$name, 
+     edge.arrow.size = 0.25, layout = layout.fruchterman.reingold, 
+     main = "Recognition Network", margin = -.08)
+```
+
+clustering/heirarchy
+
+```{r}
+library(intergraph)
+library(ergm)
+library(sna)
+```
+
+```{r}
+net3 <- asNetwork(net2)
+```
+
+```{r}
+source(file = "https://github.com/JeffreyAlanSmith/Integrated_Network_Science/raw/master/R/tau_functions.R")
+```
+
+```{r}
+weights_rankedcluster <- c(1, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1)
+weights_cluster <- c(1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
+weights_balance <- c(0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
+```
+
+```{r}
+tau_rankedcluster <- tau_stat_function(network = net3, 
+                                       weight.vector = weights_rankedcluster)
+
+tau_cluster <- tau_stat_function(network = net3, 
+                                 weight.vector = weights_cluster)
+
+tau_balance <- tau_stat_function(network = net3, 
+                                 weight.vector = weights_balance)
+
+# highest value is ranked cluster, though cluster is close
+```
+
+```{r}
+triad_names <- c("triadcensus.021D", "triadcensus.021U", "triadcensus.030T",
+                 "triadcensus.120D","triadcensus.120U")
+
+tau_rankedcluster[[2]][rownames(tau_rankedcluster[[2]]) %in% triad_names, ]
+```
+
+i think that there are signs of hierarchy, given the large tau statistics. We are seeing a LOT more of the 030T and 120U triads than expected. 
