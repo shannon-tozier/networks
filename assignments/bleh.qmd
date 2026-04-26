@@ -1,0 +1,141 @@
+---
+title: "bleh"
+format: html
+---
+
+```{r}
+library(tidyverse)
+library(igraph)
+library(netseg)
+library(scales)
+```
+
+```{r}
+all_edges <- read_table(here::here("data", "High-School_data_2013.csv"))
+
+sub_edges <- read_table(here::here("data", "Contact-diaries-network_data_2013.csv"))
+
+attributes <- read_tsv(here::here("data", "HighSchool2013_metadata.txt"))
+```
+
+```{r}
+edges <- all_edges |> 
+  distinct(i, j, .keep_all = T) |> 
+  relocate(t, .after = Cj)
+
+edges$from_group <- attributes$Gi[match(edges$i, attributes$i)]
+edges$to_group   <- attributes$Gi[match(edges$j,   attributes$i)]
+
+edges$type <- edges$from_group == edges$to_group
+```
+
+```{r}
+net <- graph_from_data_frame(d = edges,
+                             directed = F,
+                             vertices = attributes)
+
+isolated <- which(degree(net) == 0)
+net <- delete_vertices(net, isolated)
+
+attributes <- filter(attributes, i %in% edges$i | i %in% edges$j)
+```
+
+```{r}
+V(net)$color <- ifelse(attributes$Gi == "F", "lightpink", "lightblue")
+
+V(net)$shape <- ifelse(attributes$i %in% sub_edges$i, "square", "circle")
+
+E(net)$color <- ifelse(edges$type == F, "black", "red")
+
+layout <- layout_with_fr(net)
+
+bet <- betweenness(net)
+```
+
+```{r}
+par(mar = c(0, 0, 0, 0) + 0.1) 
+
+plot(net,
+     vertex.label = NA,
+     vertex.size = rescale(bet, to = c(1, 20)),
+     layout = layout)
+```
+
+```{r}
+filtered_edges <- filter(all_edges, i %in% sub_edges$i | j %in% sub_edges$i)
+
+edges2 <- filtered_edges |> 
+  distinct(i, j, .keep_all = T) |> 
+  relocate(t, .after = Cj)
+
+edges2$from_group <- attributes$Gi[match(edges2$i, attributes$i)]
+edges2$to_group   <- attributes$Gi[match(edges2$j,   attributes$i)]
+
+edges2$type <- edges2$from_group == edges2$to_group
+
+edges2$type2 <- case_when((edges2$from_group == "M" & edges2$to_group == "M") ~ "MM",
+                         (edges2$from_group == "F" & edges2$to_group == "M") ~ "FM",
+                         (edges2$from_group == "M" & edges2$to_group == "F") ~ "MF",
+                         (edges2$from_group == "F" & edges2$to_group == "F") ~ "FF")
+
+edges3 <- sub_edges
+
+edges3$from_group <- attributes$Gi[match(edges3$i, attributes$i)]
+edges3$to_group   <- attributes$Gi[match(edges3$j,   attributes$i)]
+
+edges3$type <- case_when((edges3$from_group == "M" & edges3$to_group == "M") ~ "MM",
+                         (edges3$from_group == "F" & edges3$to_group == "M") ~ "FM",
+                         (edges3$from_group == "M" & edges3$to_group == "F") ~ "MF",
+                         (edges3$from_group == "F" & edges3$to_group == "F") ~ "FF")
+```
+
+```{r}
+net2 <- graph_from_data_frame(d = edges2,
+                             directed = T,
+                             vertices = attributes)
+
+isolated <- which(degree(net2) == 0)
+net2 <- delete_vertices(net2, isolated)
+
+attributes2 <- filter(attributes, i %in% edges2$i | i %in% edges2$j)
+```
+
+```{r}
+V(net2)$color <- ifelse(attributes2$Gi == "F", "lightpink", "lightblue")
+
+E(net2)$color <- ifelse(edges2$type == F, "black", "red")
+
+V(net2)$shape <- ifelse(attributes2$i %in% sub_edges$i, "square", "circle")
+
+layout2 <- layout_with_fr(net2)
+
+bet2 <- betweenness(net2)
+```
+
+```{r}
+par(mar = c(0, 0, 0, 0) + 0.1) 
+
+plot(net2,
+     vertex.label = NA,
+     vertex.size = rescale(bet2, to = c(1, 20)),
+     edge.arrow.size = 0.5,
+     layout = layout2)
+```
+
+```{r}
+par(mfrow = c(1, 2))  # 1 row, 2 columns
+
+plot(net,
+     vertex.label = NA,
+     vertex.size = rescale(bet, to = c(1, 20)),
+     layout = layout)
+
+plot(net2,
+     vertex.label = NA,
+     vertex.size = rescale(bet, to = c(1, 20)),
+     edge.arrow.size = 0.2,
+     layout = layout2)
+
+par(mfrow = c(1, 1)) 
+```
+

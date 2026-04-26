@@ -1,0 +1,576 @@
+---
+title: "coding_challenge_ergms"
+format: html
+---
+
+### loading packages
+
+```{r}
+library(ergm)
+library(sna)
+library(car)
+```
+
+### reading in data
+
+adjacency matrix
+
+```{r}
+url1 <- "https://github.com/JeffreyAlanSmith/Integrated_Network_Science/raw/master/data/example_schoolmat.csv"
+
+school_mat <- read.csv(file = url1, row.names = 1) 
+```
+
+```{r}
+school_mat <- as.matrix(school_mat)
+
+school_mat[1:5, 1:5] # no friends :(
+```
+
+attributes
+
+```{r}
+url2 <- "https://github.com/JeffreyAlanSmith/Integrated_Network_Science/raw/master/data/example_schooldata.csv"
+
+school_attributes <- read.csv(file = url2) 
+```
+
+```{r}
+head(school_attributes)
+```
+
+recoding gender attribute
+
+```{r}
+school_attributes$gender_recode <- recode(school_attributes$gender,
+                                          as.factor = F,
+                                          "0 = 'male'; 1 = 'female'")
+```
+
+```{r}
+attribute_list <- do.call(list, school_attributes)
+```
+
+### creating network
+
+```{r}
+school_net <- network(x = school_mat,
+                      directed = T,
+                      vertex.attr = attribute_list)
+
+school_net
+```
+
+### basic network exploration
+
+```{r}
+plot(school_net)
+
+# 2 isolates; not suuper dense; fair amounts of reciprocity and triadic closure (on visual observation)
+```
+
+looking at node gender 
+
+```{r}
+cols <- recode(school_attributes$gender, as.factor = F,
+               "0 = 'blue'; 1 = 'pink'")
+```
+
+```{r}
+plot(school_net, vertex.col = cols) 
+
+# on biref glance, boys seem to be more central and more homophilous
+```
+
+looking at node grade
+
+```{r}
+plot(school_net, vertex.col = school_attributes$grade) 
+
+# somewhat homophilous by individual grade; large divide between underclassmen and upperclassmen
+```
+
+looking at node degree
+
+```{r}
+outdegree <- degree(school_net, cmode = "outdegree")
+indegree <- degree(school_net, cmode = "indegree")
+```
+
+```{r}
+tapply(indegree, school_attributes$gender_recode, mean) 
+tapply(outdegree, school_attributes$gender_recode, mean) 
+
+# boys have higher average indegree and outdegree (gender homophily increases correlation between the 2)
+```
+
+### CUG tests
+
+network density
+
+```{r}
+gden(school_net)
+# density of .125; fairly sparse (compared to what i would expect for a school friendship network)
+```
+
+```{r}
+cug.test(dat = school_net, FUN = "gden", cmode = "size") 
+
+# also mathematically way more sparse than one would expect at random
+```
+
+reciprocity
+
+```{r}
+grecip(school_net, measure = "dyadic.nonnull")
+
+# less than 50% reciprocity; lower than I would expect for friendship networks
+```
+
+```{r}
+cug.test(dat = school_net, FUN = "grecip", 
+         FUN.args = list(measure = "dyadic.nonnull"), cmode = "edges") 
+
+# mathematically much more reciprocal than one would expect at random; but I would not expect friendship reciprocity to be random so
+```
+
+### fitting an ergm
+
+edges only prediction
+
+```{r}
+mod_rand <- ergm(formula = school_net ~ edges) 
+
+summary(mod_rand) 
+
+# probability of any given tie existing is just equal to the network density 
+```
+
+```{r}
+summary(school_net~edges) 
+```
+
+adding gender and grade homophily
+
+```{r}
+mod_homoph1 <- ergm(school_net ~ edges + 
+                      nodematch("gender_recode") + 
+                      nodematch("grade")) 
+
+summary(mod_homoph1)
+
+# strong homophily on grade, but not significant on gender
+# a tie is 10x more likely if there is a match on gender
+```
+
+adding nodal gender and grade covariates
+
+```{r}
+mod_homoph2 <- ergm(school_net ~ edges + 
+                      nodematch("gender_recode") +
+                      nodematch("grade") + 
+                      nodeifactor("gender_recode") + 
+                      nodeofactor("gender_recode") +
+                      nodeicov("grade") + 
+                      nodeocov("grade"))
+
+summary(mod_homoph2)
+
+# men and upperclassmen tend to have more incoming and outgoing ties
+```
+
+adding reciprocity 
+
+```{r}
+set.seed(1012)
+
+mod_homoph_mutual1 <- ergm(school_net ~ edges + 
+                             nodematch("gender_recode") + 
+                             nodematch("grade") + 
+                             nodeifactor("gender_recode") + 
+                             nodeofactor("gender_recode") + 
+                             nodeicov("grade") + 
+                             nodeocov("grade") +
+                             mutual, 
+                           control = control.ergm(MCMC.burnin = 50000,
+                                                  MCMC.samplesize = 6000)) 
+```
+
+### checking model convergence
+
+```{r}
+mcmc.diagnostics(mod_homoph_mutual1, vars.per.page = 4)
+
+# everything is pretty centered on 0, suggesting a good level of convergence
+```
+
+```{r}
+summary(mod_homoph_mutual1)
+
+# higher in/outdegreeS for men is explained by reciprocity!
+```
+
+checking reciprocity by gender
+
+```{r}
+mod_homoph_mutual1b <- ergm(school_net ~ edges + 
+                              nodematch("gender_recode") +
+                              nodematch("grade") + 
+                              nodeicov("grade") + 
+                              nodeocov("grade") +
+                              mutual(by = "gender_recode"),
+                            control = control.ergm(MCMC.burnin = 50000, 
+                                                   MCMC.samplesize = 6000))
+
+summary(mod_homoph_mutual1b)
+
+# men have more mutual dyads than women
+```
+
+adding back node gender
+
+```{r}
+mod_homoph_mutual1c <- ergm(school_net ~ edges +
+                              nodematch("gender_recode") + 
+                              nodematch("grade") + 
+                              nodeofactor("gender_recode") + 
+                              nodeicov("grade") + 
+                              nodeocov("grade") + 
+                              mutual(by = "gender_recode"),
+                            control = control.ergm(MCMC.burnin = 50000, 
+                                                   MCMC.samplesize = 6000))
+
+summary(mod_homoph_mutual1c)
+
+# men's higher number of mutual dyads is not from higher levels of reciprocity, but from sending out more ties
+```
+
+### goodness of fit
+
+```{r}
+summary(school_net ~ esp(0:10)) 
+```
+
+```{r}
+gof_mod_homoph_mutual1 <- gof(mod_homoph_mutual1, 
+                              GOF = ~ distance + espartners + model,
+                              control = control.gof.ergm(seed = 110))
+
+par(mfrow = c(1, 3)) 
+plot(gof_mod_homoph_mutual1)
+
+gof_mod_homoph_mutual1
+
+# oh no this model is not good 
+```
+
+allowing differences in homophily for each specific grade 
+
+```{r}
+mod_homoph_mutual2 <- ergm(school_net ~ edges + 
+                             nodematch("gender_recode") + 
+                             nodematch("grade", diff = T) + 
+                             nodeifactor("gender_recode") + 
+                             nodeofactor("gender_recode") + 
+                             nodeicov("grade") + nodeocov("grade") + 
+                             mutual)
+
+summary(mod_homoph_mutual2)
+
+# most homophily in grades 7 and 12 (makes sense, since they only have 1 bordering grade)
+```
+
+```{r}
+gof_mod_homoph_mutual2 <- gof(mod_homoph_mutual2, 
+                              GOF = ~ distance + espartners + model,
+                              control = control.gof.ergm(seed = 113)) 
+
+par(mfrow = c(1, 3)) 
+plot(gof_mod_homoph_mutual2)
+
+# model lowkey still a bad fit
+```
+
+### adding a gwesp
+
+```{r}
+mod_homoph_mutual_gwesp1 <- ergm(school_net ~ edges + 
+                                   nodematch("gender_recode") + 
+                                   nodematch("grade") + 
+                                   nodeifactor("gender_recode") + 
+                                   nodeofactor("gender_recode") + 
+                                   nodeicov("grade") + nodeocov("grade") + 
+                                   mutual + gwesp(decay = 1, fixed = T), 
+                                 control = control.ergm(MCMLE.maxit = 5))
+
+# this one keeps breaking :(
+```
+ 
+ let's try a different one
+
+```{r}
+mod_homoph_mutual_gwesp2 <- ergm(school_net ~ edges + 
+                                   nodematch("gender_recode") +
+                                   nodematch("grade") + 
+                                   nodeifactor("gender_recode") + 
+                                   nodeofactor("gender_recode") + 
+                                   nodeicov("grade") + nodeocov("grade") +
+                                   mutual + gwesp(decay = .5, fixed = T),
+                                 control = control.ergm(MCMC.burnin = 50000, 
+                                                    MCMC.samplesize = 7000, 
+                                                    parallel = 2, 
+                                                    parallel.type = "PSOCK"))
+
+mcmc.diagnostics(mod_homoph_mutual_gwesp2, vars.per.page = 3) 
+# convergence is pretty good
+
+gof_mod_homoph_mutual_gwesp2 <- gof(mod_homoph_mutual_gwesp2, 
+                                    GOF = ~ distance + espartners + model, 
+                                    control = control.gof.ergm(seed = 108)) 
+
+par(mfrow = c(1, 3))
+plot(gof_mod_homoph_mutual_gwesp2) 
+
+summary(mod_homoph_mutual_gwesp2)
+
+# this model is looking pretty good!
+```
+
+### simulation
+
+```{r}
+net <- network.initialize(n = 32, directed = T)
+
+net %v% "grade" <- get.vertex.attribute(school_net, "grade")
+
+summary(school_net ~ edges + nodematch("grade")) 
+```
+
+```{r}
+mod_stronghomophily <- ergm(net ~ edges + nodematch("grade"),
+                            target.stats = c(124, 93)) 
+mod_stronghomophily
+
+mod_weakhomophily <- ergm(net ~ edges + nodematch("grade"), 
+                          target.stats = c(124, 31))
+```
+
+```{r}
+sim_strong_homophily <- simulate(mod_stronghomophily, seed = 1006) 
+summary(sim_strong_homophily ~ edges + nodematch("grade")) 
+
+
+sim_weak_homophily <- simulate(mod_weakhomophily, seed = 1009) 
+summary(sim_weak_homophily ~ edges + nodematch("grade")) 
+
+par(mfrow = c(1, 2))
+plot(sim_weak_homophily, vertex.col = "grade", main = "Weak Homophily")
+plot(sim_strong_homophily, vertex.col = "grade", main = "Strong Homophily")
+```
+
+```{r}
+gtrans(sim_weak_homophily)
+gtrans(sim_strong_homophily)
+```
+
+### ergms on large networks
+
+building the network
+
+```{r}
+url3 <- "https://github.com/JeffreyAlanSmith/Integrated_Network_Science/raw/master/data/coauthorship_edgelist.txt"
+
+coauthor_edgelist <- read.table(file = url3, header = T)
+```
+
+```{r}
+url4 <- "https://github.com/JeffreyAlanSmith/Integrated_Network_Science/raw/master/data/coauthorship_attributes.txt"
+
+coauthor_attributes <- read.table(file = url4, header = T)
+```
+
+```{r}
+coauthor_attributes$prestige <- recode(coauthor_attributes$prestige,
+                                       as.factor = F, 
+                                       "0 = 'low prestige'; 
+                                       1 = 'high prestige'")
+
+coauthor_attributes$research_type <- recode(coauthor_attributes$research_type, 
+                                            as.factor = F, 
+                                            "0 = 'qualitative'; 
+                                            1 = 'quantitative'; 
+                                            2 = 'mixed'")
+```
+
+```{r}
+coauthorship_net <- network(x = coauthor_edgelist, directed = F, 
+                            vertices = coauthor_attributes) 
+
+coauthorship_net
+```
+
+running the ergm
+
+```{r}
+mod1 <- ergm(coauthorship_net ~ edges + nodematch("research_type") +
+               nodematch("prestige"))
+
+summary(mod1)
+```
+
+```{r}
+mod2 <- ergm(coauthorship_net ~ edges + nodematch("research_type") +
+               nodematch("prestige") + nodefactor("research_type") + 
+               nodefactor("prestige"))
+
+summary(mod2)
+```
+
+sampling ergms that don't take a year and a half to run
+
+```{r}
+library(ergm.ego)
+```
+
+```{r}
+url5 <- "https://github.com/JeffreyAlanSmith/Integrated_Network_Science/raw/master/data/coauthorship_egodat.Rdata"
+
+load(url(description = url5))
+```
+
+```{r}
+set.seed(200)
+coauthorship_samp <- sample(coauthorship_egodat, 25000, replace = T)
+```
+
+```{r}
+mod1_samp <- ergm.ego(coauthorship_samp ~ edges + 
+                        nodematch("research_type") +  
+                        nodematch("prestige"), 
+                      popsize = 60098, 
+                      control = control.ergm.ego(ppopsize = 25000, 
+                                        ergm = control.ergm(parallel = 2)))
+
+summary(mod1_samp)
+```
+
+### ergms on valued networks
+
+```{r}
+url6 <- "https://github.com/JeffreyAlanSmith/Integrated_Network_Science/raw/master/data/social_interaction_edgelist.txt"
+
+social_interactions <- read.table(file = url6, header = T)
+
+
+url7 <- "https://github.com/JeffreyAlanSmith/Integrated_Network_Science/raw/master/data/social_interaction_attributes.txt"
+
+attributes <- read.table(file = url7, header = T, stringsAsFactors = F)
+```
+
+```{r}
+social_net <- network(x = social_interactions, directed = F,
+                      vertices = attributes)
+```
+
+looking at the network
+
+```{r}
+library(ggplot2)
+library(GGally)
+
+ggnet2(social_net, node.color = "gender", node.size = 7,
+       palette = c("male" = "navy", "female" = "lightskyblue"), 
+       edge.size = get.edge.attribute(social_net, "count") / 2.75, 
+       edge.color = "grey80") +
+  guides(size = "none")
+
+# seemingly strong gender homophily and good mix of strong and weak ties. good amount of triadic closure?
+```
+
+ergm time
+
+```{r}
+library(ergm.count)
+```
+
+```{r}
+count_mod1 <- ergm(social_net ~ sum, response = "count", 
+                   reference = ~ Poisson)
+
+summary(count_mod1)
+
+# expect about 1 interaction (tie value of 1) for each dyad
+```
+
+adding node and matching characteristics
+
+```{r}
+count_mod2 <- ergm(social_net ~ sum + nodematch("gender", form = "sum") + 
+                     nodematch("race", form = "sum") + 
+                     nodefactor("gender", form = "sum") + 
+                     nodefactor("race", form = "sum"), response = "count", 
+                   reference = ~ Poisson, 
+                   control = control.ergm(MCMC.samplesize = 5000))
+
+summary(count_mod2)
+
+# men interact more and there is gender hompophily; no evidence of racial homophily
+```
+
+simulation from model
+
+```{r}
+count_sim_mod2 <- simulate(count_mod2, nsim = 1)
+
+ggnet2(count_sim_mod2, node.color = "gender", node.size = 7,
+       palette = c("male" = "navy", "female" = "lightskyblue"), 
+       edge.size = get.edge.attribute(count_sim_mod2, "count") / 2.75, 
+       edge.color = "grey80") +
+  guides(size = "none")
+
+# looks much denser than the actual network!
+```
+
+looking at the number of valued ties
+
+```{r}
+count_sim_mod2_stats <- simulate(count_mod2, nsim = 100,
+                                 monitor = ~ nonzero, output = c("stats"))
+
+data.frame(sim = mean(count_sim_mod2_stats[, "nonzero"]), 
+           empirical = summary(social_net ~ nonzero, response = "count"))
+
+# huge overestimation
+```
+
+adding present ties as a model consideration
+
+```{r}
+count_mod3 <- ergm(social_net ~ sum + nodematch("gender", form = "sum") + 
+                     nodematch("race", form = "sum") + 
+                     nodefactor("gender", form = "sum") + 
+                     nodefactor("race", form = "sum") + nonzero, 
+                   response = "count", 
+                   reference = ~ Poisson,
+                   control = control.ergm(MCMC.samplesize = 5000))
+
+summary(count_mod3)
+```
+
+transitivity in valued networks
+
+```{r}
+count_mod4 <- ergm(social_net ~ sum + nodematch("gender", form = "sum") + 
+                     nodematch("race", form = "sum") + 
+                     nodefactor("gender", form = "sum") + 
+                     nodefactor("race", form = "sum") + nonzero + 
+                     transitiveweights("min", "max", "min"), 
+                   response = "count", 
+                   reference = ~ Poisson, 
+                   control = control.ergm(MCMC.samplesize = 5000))
+
+summary(count_mod4)
+
+# not a whole lot of transitivity
+```
+
