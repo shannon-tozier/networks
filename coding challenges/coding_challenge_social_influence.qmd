@@ -1,0 +1,463 @@
+---
+title: "coding_challenge_social_influence"
+format: html
+---
+
+### building the network
+
+loading the data
+
+```{r}
+url1 <- "https://github.com/JeffreyAlanSmith/Integrated_Network_Science/raw/master/data/class237_sem1_edgelist.txt"
+
+sem1_edgelist <- read.table(file = url1, header = T)
+
+url2 <- "https://github.com/JeffreyAlanSmith/Integrated_Network_Science/raw/master/data/class237_sem2_edgelist.txt"
+
+sem2_edgelist <- read.table(file = url2, header = T)
+
+url3 <- "https://github.com/JeffreyAlanSmith/Integrated_Network_Science/raw/master/data/class237_attributes.txt"
+
+attributes <- read.table(file = url3, header = T)
+```
+
+loading packages
+
+```{r}
+library(igraph) 
+library(reshape)
+library(car)
+```
+
+filtering to only students who were there both semesters
+
+```{r}
+ids_sem1 <- attributes$ids[attributes$sem_id == 1]
+ids_sem2 <- attributes$ids[attributes$sem_id == 2]
+
+ids_keep <- ids_sem1[ids_sem1 %in% ids_sem2]
+```
+
+```{r}
+attributes <- attributes[attributes$ids %in% ids_keep, ]
+
+send_in_sem1 <- sem1_edgelist[,1] %in% ids_keep
+rec_in_sem1 <- sem1_edgelist[,2] %in% ids_keep
+sem1_edgelist <- sem1_edgelist[send_in_sem1 & rec_in_sem1, ]
+
+send_in_sem2 <- sem2_edgelist[,1] %in% ids_keep
+rec_in_sem2 <- sem2_edgelist[,2] %in% ids_keep
+sem2_edgelist <- sem2_edgelist[send_in_sem2 & rec_in_sem2, ]
+```
+
+```{r}
+sem1_attributes <- attributes[attributes$sem_id == 1, ]
+sem2_attributes <- attributes[attributes$sem_id == 2, ]
+```
+
+creating the networks for each semester
+
+```{r}
+sem1_net <- graph_from_data_frame(d = sem1_edgelist, directed = T,
+                                  vertices = sem1_attributes)
+
+sem2_net <- graph_from_data_frame(d = sem2_edgelist, directed = T,
+                                  vertices = sem2_attributes)
+```
+
+visualizing networks; colored by affect toward subject 
+
+```{r}
+cols_sem1 <- recode(sem1_attributes$like_subject, as.factor = F,
+                    "1 = 'blue'; 2 = 'light blue'; 3 = 'pink'; 
+                     4 ='red'; NA = 'black'")
+
+cols_sem2 <- recode(sem2_attributes$like_subject, as.factor = F,
+                    "1 = 'blue'; 2 = 'light blue'; 3 = 'pink'; 
+                     4 = 'red'; NA = 'black'")
+```
+
+```{r}
+layout <- layout_with_fr(sem1_net)
+
+par(mfrow = c(1, 2))
+
+plot(sem1_net, vertex.label = NA, layout = layout, edge.arrow.size = .3, 
+     edge.arrow.width = 1, edge.color="light gray",
+     vertex.frame.color = NA, vertex.color = cols_sem1) 
+
+plot(sem2_net, vertex.label = NA, layout = layout, edge.arrow.size = .3,
+     edge.arrow.width = 1, edge.color = "light gray",
+     vertex.frame.color = NA, vertex.color = cols_sem2) 
+
+# obvious changes in opinion
+```
+
+### SIENA model setup
+
+```{r}
+library(RSiena)
+```
+
+changing data to matrix form
+
+```{r}
+sem1_matrix <- as_adjacency_matrix(graph = sem1_net, sparse = F)
+sem2_matrix <- as_adjacency_matrix(graph = sem2_net, sparse = F)
+
+table(rownames(sem1_matrix) == rownames(sem2_matrix))
+```
+
+preliminary look at changes in ties between the semsters
+
+```{r}
+tab_change <- table(sem1_matrix, sem2_matrix)
+tab_change
+
+# 42 stable ties, 58 new, 47 dropped
+
+42 / (58 + 47 + 42)
+
+# similarity with Jaccard index; 28.6% of ties were present in both semesters
+```
+
+```{r}
+table(sem1_attributes$ids == sem2_attributes$ids)
+```
+
+changes matrices to arrays
+
+```{r}
+net_size <- nrow(sem1_matrix)
+net_size
+
+sem12_array <- array(c(sem1_matrix, sem2_matrix), 
+                     dim = c(net_size, net_size, 2))
+```
+
+creating tie status as the dependent variable
+
+```{r}
+networks <- sienaDependent(netarray = sem12_array, type = "oneMode") 
+```
+
+creating subject opinion as dependent variable
+
+```{r}
+like_subject_matrix <- as.matrix(cbind(sem1_attributes$like_subject,
+                                       sem2_attributes$like_subject))
+
+like_subject <- sienaDependent(netarray = like_subject_matrix, 
+                               type = "behavior") 
+```
+
+creating covariate (opinion of teacher)
+
+```{r}
+like_teacher <- coCovar(sem1_attributes$like_teacher)
+```
+
+creating the SIENA object for the model
+
+```{r}
+net_behavior_covar <- sienaDataCreate(networks, like_subject, like_teacher)
+net_behavior_covar
+
+# can see basic stats like density and range of variables
+```
+
+### model specification
+
+base model
+
+```{r}
+siena_effects <- getEffects(net_behavior_covar)
+siena_effects
+```
+
+behavioral model
+
+```{r}
+siena_effects <- includeEffects(siena_effects, avSim, 
+                                interaction1 = "networks",
+                                name = "like_subject")  # peer influence/general opinion convergence
+
+
+siena_effects <- includeEffects(siena_effects, indeg, 
+                                interaction1 = "networks",
+                                name = "like_subject") # effect of in-degree on subject opinion
+
+
+siena_effects <- includeEffects(siena_effects, effFrom,
+                                interaction1 = "like_teacher", 
+                                name = "like_subject") # individual-level covariates (liking teacher)
+```
+
+network model
+
+```{r}
+siena_effects <- includeEffects(siena_effects, simX, 
+                                 interaction1 = "like_subject", 
+                                 name = "networks") # selection based on shared opinion
+
+
+siena_effects <- includeEffects(siena_effects, egoX, 
+                                 interaction1 = "like_subject", 
+                                 name = "networks") # effect of subject opinion on out-degree
+
+
+siena_effects <- includeEffects(siena_effects, altX, 
+                                 interaction1 = "like_subject", 
+                                 name = "networks") # effect of subject opinion on in-degree
+
+
+siena_effects <- includeEffects(siena_effects, transTrip, name = "networks") # transitivity
+```
+
+### model estimation
+
+```{r}
+input_options <- sienaAlgorithmCreate(projname = "class_model", 
+                                      MaxDegree = c(networks = 5), 
+                                      seed = 30000) 
+```
+
+```{r}
+mod1 <- siena07(alg = input_options, data = net_behavior_covar, 
+                effects = siena_effects, useCluster = TRUE,
+                nbrNodes = 2) 
+
+mod1
+
+# convergence under 0.25 which is good
+# large standard errors; no significant results
+```
+
+trying a simpler model with less terms 
+
+```{r}
+siena_effects <- includeEffects(siena_effects, indeg, 
+                                interaction1 = "networks",
+                                name = "like_subject", include = FALSE) 
+
+siena_effects <- includeEffects(siena_effects, effFrom,
+                                interaction1 = "like_teacher", 
+                                name = "like_subject", include = FALSE) 
+
+# also increasing number of iterations
+input_options <- sienaAlgorithmCreate(projname = "class_model", 
+                                      MaxDegree = c(networks = 5), 
+                                      n3 = 3000, seed = 30000)
+```
+
+```{r}
+mod2 <- siena07(alg = input_options, data = net_behavior_covar, 
+                effects = siena_effects, returnDeps = TRUE,
+                useCluster = TRUE, nbrNodes = 2) 
+
+mod2
+
+# convergence still good
+# still not significant results; likely due to small size of network and only 2 time periods
+```
+
+### checking model fit
+
+in-degree
+
+```{r}
+gof1 <- sienaGOF(object = mod2, 
+                 auxiliaryFunction = IndegreeDistribution, 
+                 verbose = TRUE, join = TRUE, varName = "networks") 
+
+plot(gof1)
+
+# looks good
+```
+
+triad census
+
+```{r}
+gof2 <- sienaGOF(object = mod2, auxiliaryFunction = TriadCensus, 
+                 verbose = TRUE, join = TRUE, varName = "networks")
+
+plot(gof2, center = TRUE, scale = TRUE)   
+
+# also looks good
+```
+
+behavior/opinion distribution
+
+```{r}
+gof_behaviour <- sienaGOF(object = mod2, 
+                          auxiliaryFunction = BehaviorDistribution,
+                          varName = "like_subject")
+
+plot(gof_behaviour)
+
+# also okay
+```
+
+### SIENA with 3 time periods
+
+reading in the data
+
+```{r}
+url4 <- "https://github.com/JeffreyAlanSmith/Integrated_Network_Science/raw/master/data/Glasgow-friendship.RData"
+
+load(url(description = url4))
+
+url5 <- "https://github.com/JeffreyAlanSmith/Integrated_Network_Science/raw/master/data/Glasgow-substances.RData"
+
+load(url(description = url5))
+
+url6 <- "https://github.com/JeffreyAlanSmith/Integrated_Network_Science/raw/master/data/Glasgow-demographic.RData"
+
+load(url(description = url6))
+
+# friendship and alcohol use
+```
+
+removing value from ties
+
+```{r}
+friendship.1[friendship.1 == 2] <- 1
+friendship.2[friendship.2 == 2] <- 1
+friendship.3[friendship.3 == 2] <- 1
+```
+
+converting matrices to array
+
+```{r}
+net_size_ex2 <- nrow(friendship.1)
+  
+net_array <- array(c(friendship.1, friendship.2, friendship.3), 
+                dim = c(net_size_ex2, net_size_ex2, 3))
+```
+
+creating network siena object
+
+```{r}
+friendship <- sienaDependent(netarray = net_array, type = "oneMode") 
+```
+
+creating behavioral siena object
+
+```{r}
+alcohol_depvar <- sienaDependent(netarray = alcohol, type = "behavior") 
+```
+
+creating gender covariate
+
+```{r}
+gender <- coCovar(sex.F) 
+```
+
+putting the whole thing together
+
+```{r}
+friend_behavior_covar <- sienaDataCreate(friendship, alcohol_depvar, gender)
+```
+
+specifying the model
+
+```{r}
+siena_effects_3wave_example <- getEffects(friend_behavior_covar) 
+# starting with base model
+
+# adding peer influence
+siena_effects_3wave_example <- includeEffects(siena_effects_3wave_example, 
+                                              avSim, 
+                                              interaction1 = "friendship", 
+                                              name = "alcohol_depvar")
+
+# adding gender behavior effect
+siena_effects_3wave_example <- includeEffects(siena_effects_3wave_example, 
+                                              effFrom, 
+                                              interaction1 = "gender", 
+                                              name = "alcohol_depvar")
+
+# adding effect of drinking on in-degree and out-degree
+siena_effects_3wave_example <- includeEffects(siena_effects_3wave_example, 
+                                              egoX, 
+                                              interaction1 = "alcohol_depvar", 
+                                              name = "friendship")
+
+siena_effects_3wave_example <- includeEffects(siena_effects_3wave_example, 
+                                              altX, 
+                                              interaction1 = "alcohol_depvar", 
+                                              name = "friendship")
+
+# adding selection on shared behavior
+siena_effects_3wave_example <- includeEffects(siena_effects_3wave_example, 
+                                              simX,  
+                                              interaction1 = "alcohol_depvar", 
+                                              name = "friendship")
+
+# adding transitivity
+siena_effects_3wave_example <- includeEffects(siena_effects_3wave_example, 
+                                              transTrip, name = "friendship")
+```
+
+estimate the model
+
+```{r}
+# set up control inputs
+input_options_3wave <- sienaAlgorithmCreate(MaxDegree = c(friendship = 6),
+                                            n3 = 3000, seed = 5000) 
+```
+
+```{r}
+mod1_3wave_example <- siena07(input_options_3wave, 
+                              data = friend_behavior_covar, 
+                              effects = siena_effects_3wave_example, 
+                              returnDeps = TRUE, initC = TRUE, 
+                              useCluster = TRUE, nbrNodes = 2) 
+
+mod1_3wave_example
+```
+
+checking model fit
+
+```{r}
+gof1 <- sienaGOF(mod1_3wave_example, IndegreeDistribution, 
+                 verbose = TRUE, join = TRUE, varName = "friendship") 
+
+plot(gof1)
+# looks okay
+
+gof_behaviour <- sienaGOF(mod1_3wave_example, BehaviorDistribution,
+                          varName = "alcohol_depvar")
+plot(gof_behaviour)
+```
+
+testing for time heterogeneity
+
+```{r}
+timetest <- sienaTimeTest(mod1_3wave_example)
+summary(timetest)
+
+# joint significance p-value is not significant; no need for a model that allows variance based on time period
+```
+
+```{r}
+siena_effects_3wave_example <- includeTimeDummy(siena_effects_3wave_example, 
+                                                density, 
+                                                transTrip, 
+                                                timeDummy = "2")
+# putting in that time variance term for kicks
+```
+
+running model
+
+```{r}
+mod2_3wave_example <- siena07(input_options_3wave,
+                              data = friend_behavior_covar,
+                              effects = siena_effects_3wave_example, 
+                              returnDeps = TRUE, 
+                              initC = TRUE, useCluster = TRUE, 
+                              nbrNodes = 2) 
+
+mod2_3wave_example
+```
+
