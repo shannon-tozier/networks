@@ -1,0 +1,247 @@
+---
+title: "final_report"
+format: html
+---
+
+```{r}
+library(tidyverse)
+library(igraph)
+library(lubridate)
+library(dplyr)
+```
+
+```{r}
+all_edges <- read_table(here::here("data", "High-School_data_2013.csv"))
+
+sub_edges <- read_table(here::here("data", "Contact-diaries-network_data_2013.csv"))
+
+attributes <- read_tsv(here::here("data", "HighSchool2013_metadata.txt"))
+```
+
+## interaction network
+
+```{r}
+all_edges$d <- as.Date(as.POSIXct(all_edges$t, origin = "1970-01-01", tz = "CET"))
+
+filtered_edges <- filter(all_edges, d == "2013-12-05")
+
+filtered_edges <- filtered_edges |> add_count(i, j, name = "weight") 
+
+edges <- filtered_edges |> 
+  distinct(i, j, .keep_all = T) |> 
+  select(i, j, weight)
+
+attributes1 <- filter(attributes, i %in% edges$i | i %in% edges$j)
+```
+
+```{r}
+net <- graph_from_data_frame(d = edges,
+                             directed = F,
+                             vertices = attributes1)
+```
+
+```{r}
+cols <- c(
+  "2BIO1" = "lightgreen", "2BIO2" = "lightgreen", "2BIO3" = "lightgreen",
+  "MP"    = "lightblue",  "MP*1"  = "lightblue",  "MP*2"  = "lightblue",
+  "PC"    = "pink",       "PC*"   = "pink",
+  "PSI*"  = "khaki1"
+)
+
+V(net)$color <- cols[V(net)$Ci]
+
+V(net)$shape <- ifelse(attributes1$Gi == "M", "square", "circle")
+
+E(net)$width <- scales::rescale(rank(E(net)$weight), to = c(0.5, 5))
+
+par(mar = c(0, 0, 0, 0) + 0.1) 
+```
+
+## recall network
+
+```{r}
+attributes2 <- filter(attributes, i %in% sub_edges$i | i %in% sub_edges$j)
+
+sub_edges <- rename(sub_edges, weight = w)
+```
+
+```{r}
+net2 <- graph_from_data_frame(d = sub_edges,
+                             directed = T,
+                             vertices = attributes2)
+```
+
+```{r}
+V(net2)$color <- cols[V(net2)$Ci]
+
+V(net2)$shape <- ifelse(attributes2$Gi == "M", "square", "circle")
+```
+
+## plotting
+
+```{r}
+net_union <- graph.union(net, as_undirected(net2), byname = TRUE)
+
+layout <- layout_with_fr(net_union)
+
+layout_scaled <- layout * 0.075
+
+layout_net <- layout_scaled[match(V(net)$name, V(net_union)$name), ]
+layout_net2 <- layout_scaled[match(V(net2)$name, V(net_union)$name), ]
+
+shared_xlim <- range(layout_scaled[,1])
+shared_ylim <- range(layout_scaled[,2])
+```
+
+```{r}
+par(mfrow = c(1, 2), mar = c(0, 0, 0, 0))
+
+plot(net,
+     vertex.label = NA,
+     rescale = FALSE,
+     xlim = shared_xlim, 
+     ylim = shared_ylim,
+     vertex.size = 3,
+     edge.width = E(net)$width,
+     layout = layout_net)
+mtext("Interaction", side = 3, line = -4)
+
+plot(net2,
+     vertex.label = NA,
+     rescale = FALSE,
+     xlim = shared_xlim, 
+     ylim = shared_ylim,
+     vertex.size = 3,
+     edge.width = E(net2)$weight/1.5,
+     edge.arrow.size = 0.1,
+     layout = layout_net2)
+mtext("Recall", side = 3, line = -4)
+```
+
+## MRQAP
+
+```{r}
+library(asnipe)
+```
+
+```{r}
+mat1 <- as_adjacency_matrix(net, attr = "weight", sparse = FALSE)
+mat2 <- as_adjacency_matrix(net2, attr = "weight", sparse = FALSE)
+```
+
+```{r}
+all_nodes <- union(V(net)$name, V(net2)$name)
+
+expand_matrix <- function(mat, all_nodes) {
+  full <- matrix(0, nrow = length(all_nodes), ncol = length(all_nodes),
+                 dimnames = list(all_nodes, all_nodes))
+  shared <- rownames(mat)
+  full[shared, shared] <- mat
+  return(full)
+}
+
+mat1_full <- expand_matrix(mat1, all_nodes)
+mat2_full <- expand_matrix(mat2, all_nodes)
+```
+
+basic model
+
+```{r}
+result <- mrqap.dsp(mat2_full ~ mat1_full, 
+                    directed = "nosym",
+                    randomisations = 1000)
+summary(result)
+
+result$coefficients      
+result$P.greater
+result$AIC 
+```
+
+looking at gender
+
+```{r}
+gender <- vertex_attr(net, "Gi")[match(all_nodes, V(net)$name)]
+
+gender_matrix <- outer(gender, gender, FUN = function(x, y) {
+  ifelse(x == "F" & y == "F", "FF",
+  ifelse(x == "M" & y == "M", "MM", "mixed"))
+})
+```
+
+```{r}
+mat_FF <- outer(gender, gender, FUN = function(x, y) 
+  as.numeric(x == "F" & y == "F"))
+
+mat_MM <- outer(gender, gender, FUN = function(x, y) 
+  as.numeric(x == "M" & y == "M"))
+```
+
+```{r}
+result2 <- mrqap.dsp(mat2_full ~ mat1_full + mat_FF + mat_MM,
+                    directed = "nosym",
+                    randomisations = 1000)
+
+result2$coefficients      
+result2$P.greater
+result2$AIC 
+```
+
+adding class track
+
+```{r}
+class <- vertex_attr(net, "Ci")[match(all_nodes, V(net)$name)]
+
+mat_class <- outer(class, class, FUN = function(x, y) as.numeric(x == y))
+```
+
+```{r}
+result3 <- mrqap.dsp(mat2_full ~ mat1_full + mat_FF + mat_MM + mat_class,
+                     directed = "nosym",
+                     randomisations = 1000)
+result3$coefficients      
+result3$P.greater
+result3$AIC 
+```
+
+comparing results
+
+```{r}
+
+model_table <- data.frame(
+  term = c("Intercept", "mat1_full", "mat_FF", "mat_MM", "mat_ci"),
+  coef_m1  = c(result$coefficients,  NA, NA, NA),
+  coef_m2  = c(result2$coefficients, NA),
+  coef_m3  = result3$coefficients,
+  pgtr_m1  = c(result$P.greater,  NA, NA, NA),
+  pgtr_m2  = c(result2$P.greater, NA),
+  pgtr_m3  = result3$P.greater
+)
+
+aic_row <- data.frame(
+  term = "AIC",
+  coef_m1 = result$AIC, coef_m2 = result2$AIC, coef_m3 = result3$AIC,
+  pgtr_m1 = NA,         pgtr_m2 = NA,           pgtr_m3 = NA
+)
+
+model_table <- bind_rows(model_table, aic_row)
+
+colnames(model_table) <- c("Term", 
+                            "Coef (M1)", "Coef (M2)", "Coef (M3)",
+                            "P.greater (M1)", "P.greater (M2)", "P.greater (M3)")
+
+model_table
+```
+
+```{r}
+library(kableExtra)
+kable(model_table, digits = 3) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
+  row_spec(nrow(model_table), bold = TRUE)
+```
+
+
+
+
+
+
+
